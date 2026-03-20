@@ -11,7 +11,7 @@ extern "C"
 			.DMA_IRQ_num = DMA_IRQ_1,
 
 #if PICO_RP2040
-			.baud_rate = 1 * 1000 * 10
+			.baud_rate = 4 * 1000 * 1000
 #endif
 
 #if PICO_RP2350

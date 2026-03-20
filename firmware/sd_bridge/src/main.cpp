@@ -1,289 +1,256 @@
+#include <array>
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 
 #include "pico/stdlib.h"
-#include "pico/time.h"
 
 extern "C"
 {
+#include "diskio.h"
 #include "ff.h"
 #include "f_util.h"
 #include "hw_config.h"
 }
 
-#include "app_config.hpp"
-
 namespace
 {
+	constexpr BYTE kPdrv = 0;
+	constexpr LBA_t kTestLba = 0;
+	constexpr UINT kSectorCount = 1;
+	constexpr size_t kSectorSize = FF_MAX_SS;
+	constexpr int kReadRepeatCount = 3;
 
-	FATFS g_fs;
-	bool g_sd_ready = false;
-
-	void init_button(uint gpio)
+	void wait_for_stdio()
 	{
-		gpio_init(gpio);
-		gpio_set_dir(gpio, GPIO_IN);
-		gpio_pull_up(gpio);
-	}
+		stdio_init_all();
 
-	bool is_button_pressed(uint gpio)
-	{
-		return gpio_get(gpio) == BUTTON_ACTIVE_LEVEL;
-	}
-
-	bool mount_sd_once()
-	{
-		std::memset(&g_fs, 0, sizeof(g_fs));
-
-		std::printf("before f_mount\r\n");
-		FRESULT fr = f_mount(&g_fs, "", 1);
-		std::printf("after f_mount: %d\r\n", fr);
-
-		if (fr != FR_OK)
+		for (int i = 0; i < 100; ++i)
 		{
+			sleep_ms(100);
+		}
+	}
+
+	void print_card_config()
+	{
+		std::printf("sd_get_num() = %u\r\n", static_cast<unsigned>(sd_get_num()));
+
+		sd_card_t *card = sd_get_by_num(kPdrv);
+		if (!card)
+		{
+			std::printf("sd_get_by_num(%u) returned null\r\n", static_cast<unsigned>(kPdrv));
+			return;
+		}
+
+		std::printf("card type = %d\r\n", static_cast<int>(card->type));
+
+		if (card->type == SD_IF_SDIO && card->sdio_if_p)
+		{
+			std::printf(
+				"SDIO cfg: CMD=%u D0=%u PIO=%s DMA_IRQ=%u baud=%" PRIu32 "\r\n",
+				card->sdio_if_p->CMD_gpio,
+				card->sdio_if_p->D0_gpio,
+				(card->sdio_if_p->SDIO_PIO == pio0) ? "pio0" : (card->sdio_if_p->SDIO_PIO == pio1) ? "pio1"
+																								   : "unknown",
+				static_cast<unsigned>(card->sdio_if_p->DMA_IRQ_num),
+				static_cast<uint32_t>(card->sdio_if_p->baud_rate));
+		}
+	}
+
+	void dump_hex(const uint8_t *data, size_t size)
+	{
+		for (size_t base = 0; base < size; base += 16)
+		{
+			std::printf("%04zx :", base);
+
+			for (size_t i = 0; i < 16; ++i)
+			{
+				if (base + i < size)
+				{
+					std::printf(" %02x", data[base + i]);
+				}
+				else
+				{
+					std::printf("   ");
+				}
+			}
+
+			std::printf("  |");
+
+			for (size_t i = 0; i < 16 && (base + i) < size; ++i)
+			{
+				uint8_t c = data[base + i];
+				std::printf("%c", (c >= 0x20 && c <= 0x7e) ? static_cast<char>(c) : '.');
+			}
+
+			std::printf("|\r\n");
+		}
+	}
+
+	uint32_t checksum32(const uint8_t *data, size_t size)
+	{
+		uint32_t acc = 0x811c9dc5u;
+
+		for (size_t i = 0; i < size; ++i)
+		{
+			acc ^= data[i];
+			acc *= 16777619u;
+		}
+
+		return acc;
+	}
+
+	bool read_sector_once(BYTE pdrv, LBA_t lba, uint8_t *buffer, size_t buffer_size)
+	{
+		if (buffer_size < kSectorSize)
+		{
+			std::printf("buffer too small: %u < %u\r\n",
+						static_cast<unsigned>(buffer_size),
+						static_cast<unsigned>(kSectorSize));
+			return false;
+		}
+
+		std::memset(buffer, 0, buffer_size);
+
+		DRESULT dr = disk_read(pdrv, buffer, lba, kSectorCount);
+		if (dr != RES_OK)
+		{
+			std::printf("disk_read(pdrv=%u, lba=%" PRIu32 ") failed: %d\r\n",
+						static_cast<unsigned>(pdrv),
+						static_cast<uint32_t>(lba),
+						static_cast<int>(dr));
 			return false;
 		}
 
 		return true;
 	}
 
-	bool write_text(FIL &fil, const char *text)
+	void print_disk_status(BYTE pdrv)
 	{
-		UINT written = 0;
-		FRESULT fr = f_write(&fil, text, static_cast<UINT>(std::strlen(text)), &written);
+		DSTATUS st = disk_status(pdrv);
+		std::printf("disk_status(%u) = 0x%02x\r\n",
+					static_cast<unsigned>(pdrv),
+					static_cast<unsigned>(st));
+	}
 
-		if (fr != FR_OK)
+	bool initialize_disk(BYTE pdrv)
+	{
+		print_disk_status(pdrv);
+
+		std::printf("before disk_initialize(%u)\r\n", static_cast<unsigned>(pdrv));
+		DSTATUS st = disk_initialize(pdrv);
+		std::printf("after disk_initialize(%u): 0x%02x\r\n",
+					static_cast<unsigned>(pdrv),
+					static_cast<unsigned>(st));
+
+		if (st & STA_NOINIT)
 		{
-			std::printf("f_write failed: %d\r\n", fr);
+			std::printf("disk still reports STA_NOINIT\r\n");
 			return false;
 		}
 
-		if (written != std::strlen(text))
-		{
-			std::printf("short write: %u / %u\r\n",
-						written,
-						static_cast<unsigned>(std::strlen(text)));
-			return false;
-		}
-
+		print_disk_status(pdrv);
 		return true;
 	}
 
-	bool generate_file_list_txt()
+	void probe_block_zero()
 	{
-		if (!g_sd_ready)
+		alignas(4) std::array<uint8_t, kSectorSize> first{};
+		alignas(4) std::array<uint8_t, kSectorSize> current{};
+
+		bool have_first = false;
+
+		for (int attempt = 0; attempt < kReadRepeatCount; ++attempt)
 		{
-			std::printf("SD not ready\r\n");
-			return false;
-		}
+			std::printf("---- read attempt %d ----\r\n", attempt + 1);
 
-		std::printf("generate_file_list_txt: begin\r\n");
-
-		FIL fil;
-		FRESULT fr = f_open(&fil, "LIST.TXT", FA_CREATE_ALWAYS | FA_WRITE);
-		std::printf("after f_open: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return false;
-		}
-
-		auto fail_close = [&](const char *label, FRESULT code) -> bool
-		{
-			std::printf("%s: %d\r\n", label, code);
-			f_close(&fil);
-			return false;
-		};
-
-		if (!write_text(fil, "LIST.TXT\r\n"))
-		{
-			return fail_close("header write failed", FR_INT_ERR);
-		}
-
-		if (!write_text(fil, "==============================\r\n"))
-		{
-			return fail_close("separator write failed", FR_INT_ERR);
-		}
-
-		DIR dir;
-		FILINFO fno;
-
-		fr = f_opendir(&dir, "");
-		std::printf("after f_opendir: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return fail_close("f_opendir failed", fr);
-		}
-
-		for (;;)
-		{
-			fr = f_readdir(&dir, &fno);
-			if (fr != FR_OK)
+			if (!read_sector_once(kPdrv, kTestLba, current.data(), current.size()))
 			{
-				f_closedir(&dir);
-				return fail_close("f_readdir failed", fr);
+				std::printf("raw read failed on attempt %d\r\n", attempt + 1);
+				return;
 			}
 
-			if (fno.fname[0] == '\0')
+			uint32_t sum = checksum32(current.data(), current.size());
+			std::printf("block %" PRIu32 " checksum32 = 0x%08" PRIx32 "\r\n",
+						static_cast<uint32_t>(kTestLba),
+						sum);
+
+			dump_hex(current.data(), 64);
+
+			if (!have_first)
 			{
-				break;
+				first = current;
+				have_first = true;
+				continue;
 			}
 
-			char line[384];
-
-			if (fno.fattrib & AM_DIR)
+			if (std::memcmp(first.data(), current.data(), current.size()) == 0)
 			{
-				std::snprintf(line, sizeof(line), "[DIR ] %s\r\n", fno.fname);
+				std::printf("compare vs attempt 1: IDENTICAL\r\n");
 			}
 			else
 			{
-				std::snprintf(
-					line,
-					sizeof(line),
-					"[FILE] %10lu %s\r\n",
-					static_cast<unsigned long>(fno.fsize),
-					fno.fname);
+				std::printf("compare vs attempt 1: DIFFERENT\r\n");
+
+				for (size_t i = 0; i < current.size(); ++i)
+				{
+					if (first[i] != current[i])
+					{
+						std::printf("first diff at offset 0x%04zx: %02x -> %02x\r\n",
+									i,
+									first[i],
+									current[i]);
+						break;
+					}
+				}
 			}
-
-			if (!write_text(fil, line))
-			{
-				f_closedir(&dir);
-				return fail_close("item write failed", FR_INT_ERR);
-			}
 		}
-
-		fr = f_closedir(&dir);
-		if (fr != FR_OK)
-		{
-			return fail_close("f_closedir failed", fr);
-		}
-
-		fr = f_sync(&fil);
-		std::printf("after f_sync: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return fail_close("f_sync failed", fr);
-		}
-
-		fr = f_close(&fil);
-		std::printf("after f_close: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return false;
-		}
-
-		return true;
 	}
 
+	void optional_mount_check()
+	{
+		FATFS fs;
+		std::memset(&fs, 0, sizeof(fs));
+
+		std::printf("before optional f_mount\r\n");
+		FRESULT fr = f_mount(&fs, "", 1);
+		std::printf("after optional f_mount: %d (%s)\r\n", fr, FRESULT_str(fr));
+
+		if (fr == FR_OK)
+		{
+			f_unmount("");
+			std::printf("optional f_mount succeeded\r\n");
+		}
+	}
 }
-
-// int main()
-// {
-// 	stdio_init_all();
-
-// 	init_button(SELECT_BUTTON_GPIO);
-
-// 	sleep_ms(1500);
-// 	std::printf("kachkojir normal mode start\r\n");
-
-// 	g_sd_ready = mount_sd_once();
-
-// 	if (g_sd_ready)
-// 	{
-// 		std::printf("SD mounted successfully\r\n");
-// 	}
-// 	else
-// 	{
-// 		std::printf("SD mount failed\r\n");
-// 	}
-
-// 	std::printf("Press SELECT button to generate LIST.TXT\r\n");
-
-// 	absolute_time_t last_trigger = get_absolute_time();
-
-// 	while (true)
-// 	{
-// 		if (is_button_pressed(SELECT_BUTTON_GPIO))
-// 		{
-// 			absolute_time_t now = get_absolute_time();
-
-// 			if (absolute_time_diff_us(last_trigger, now) >= static_cast<int64_t>(SELECT_REPEAT_GUARD_MS) * 1000)
-// 			{
-// 				sleep_ms(SELECT_DEBOUNCE_MS);
-
-// 				if (is_button_pressed(SELECT_BUTTON_GPIO))
-// 				{
-// 					std::printf("SELECT pressed\r\n");
-
-// 					bool ok = generate_file_list_txt();
-
-// 					if (ok)
-// 					{
-// 						std::printf("LIST.TXT generated\r\n");
-// 					}
-// 					else
-// 					{
-// 						std::printf("LIST.TXT generation failed\r\n");
-// 					}
-
-// 					last_trigger = get_absolute_time();
-
-// 					while (is_button_pressed(SELECT_BUTTON_GPIO))
-// 					{
-// 						sleep_ms(10);
-// 					}
-// 				}
-// 			}
-// 		}
-
-// 		sleep_ms(10);
-// 	}
-// }
 
 int main()
 {
-	stdio_init_all();
-	for (size_t i = 0; i < 100; i++)
+	wait_for_stdio();
+
+	std::printf("\r\n");
+	std::printf("kachkojir sdio raw-read probe start\r\n");
+
+	print_card_config();
+
+	if (!initialize_disk(kPdrv))
 	{
-		sleep_ms(100);
+		std::printf("disk_initialize failed\r\n");
+		while (true)
+		{
+			sleep_ms(1000);
+		}
 	}
 
-	std::printf("Hello, world!");
+	probe_block_zero();
 
-	// FatFs - Generic FAT Filesystem Module, "Application Interface" を参照
-	// http://elm-chan.org/fsw/ff/00index_e.html
-	FATFS fs;
-	FRESULT fr = f_mount(&fs, "", 1);
-	if (FR_OK != fr)
-	{
-		panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
-		return -1;
-	}
+	// raw read が安定してから mount 側を確認したいときだけ有効化
+	// optional_mount_check();
 
-	FIL fil;
-	const char *const filename = "filename.txt";
-	fr = f_open(&fil, filename, FA_OPEN_APPEND | FA_WRITE);
-	if (FR_OK != fr && FR_EXIST != fr)
-	{
-		panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
-		return -1;
-	}
+	std::printf("probe done\r\n");
 
-	if (f_printf(&fil, "Hello, world!\n") < 0)
-	{
-		printf("f_printf failed\n");
-	}
-
-	fr = f_close(&fil);
-	if (FR_OK != fr)
-	{
-		printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
-	}
-
-	f_unmount("");
-
-	std::printf("Goodbye, world!");
 	while (true)
 	{
-		sleep_ms(10);
+		sleep_ms(1000);
 	}
 }
