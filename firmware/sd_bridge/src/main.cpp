@@ -7,6 +7,8 @@
 extern "C"
 {
 #include "ff.h"
+#include "f_util.h"
+#include "hw_config.h"
 }
 
 #include "app_config.hpp"
@@ -174,65 +176,114 @@ namespace
 
 }
 
+// int main()
+// {
+// 	stdio_init_all();
+
+// 	init_button(SELECT_BUTTON_GPIO);
+
+// 	sleep_ms(1500);
+// 	std::printf("kachkojir normal mode start\r\n");
+
+// 	g_sd_ready = mount_sd_once();
+
+// 	if (g_sd_ready)
+// 	{
+// 		std::printf("SD mounted successfully\r\n");
+// 	}
+// 	else
+// 	{
+// 		std::printf("SD mount failed\r\n");
+// 	}
+
+// 	std::printf("Press SELECT button to generate LIST.TXT\r\n");
+
+// 	absolute_time_t last_trigger = get_absolute_time();
+
+// 	while (true)
+// 	{
+// 		if (is_button_pressed(SELECT_BUTTON_GPIO))
+// 		{
+// 			absolute_time_t now = get_absolute_time();
+
+// 			if (absolute_time_diff_us(last_trigger, now) >= static_cast<int64_t>(SELECT_REPEAT_GUARD_MS) * 1000)
+// 			{
+// 				sleep_ms(SELECT_DEBOUNCE_MS);
+
+// 				if (is_button_pressed(SELECT_BUTTON_GPIO))
+// 				{
+// 					std::printf("SELECT pressed\r\n");
+
+// 					bool ok = generate_file_list_txt();
+
+// 					if (ok)
+// 					{
+// 						std::printf("LIST.TXT generated\r\n");
+// 					}
+// 					else
+// 					{
+// 						std::printf("LIST.TXT generation failed\r\n");
+// 					}
+
+// 					last_trigger = get_absolute_time();
+
+// 					while (is_button_pressed(SELECT_BUTTON_GPIO))
+// 					{
+// 						sleep_ms(10);
+// 					}
+// 				}
+// 			}
+// 		}
+
+// 		sleep_ms(10);
+// 	}
+// }
+
 int main()
 {
 	stdio_init_all();
-
-	init_button(SELECT_BUTTON_GPIO);
-
-	sleep_ms(1500);
-	std::printf("kachkojir normal mode start\r\n");
-
-	g_sd_ready = mount_sd_once();
-
-	if (g_sd_ready)
+	for (size_t i = 0; i < 100; i++)
 	{
-		std::printf("SD mounted successfully\r\n");
-	}
-	else
-	{
-		std::printf("SD mount failed\r\n");
+		sleep_ms(100);
 	}
 
-	std::printf("Press SELECT button to generate LIST.TXT\r\n");
+	std::printf("Hello, world!");
 
-	absolute_time_t last_trigger = get_absolute_time();
+	// FatFs - Generic FAT Filesystem Module, "Application Interface" を参照
+	// http://elm-chan.org/fsw/ff/00index_e.html
+	FATFS fs;
+	FRESULT fr = f_mount(&fs, "", 1);
+	if (FR_OK != fr)
+	{
+		panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+		return -1;
+	}
 
+	FIL fil;
+	const char *const filename = "filename.txt";
+	fr = f_open(&fil, filename, FA_OPEN_APPEND | FA_WRITE);
+	if (FR_OK != fr && FR_EXIST != fr)
+	{
+		panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
+		return -1;
+	}
+
+	if (f_printf(&fil, "Hello, world!\n") < 0)
+	{
+		printf("f_printf failed\n");
+	}
+
+	fr = f_close(&fil);
+	if (FR_OK != fr)
+	{
+		printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
+	}
+
+	f_unmount("");
+
+	std::printf("Goodbye, world!");
 	while (true)
 	{
-		if (is_button_pressed(SELECT_BUTTON_GPIO))
-		{
-			absolute_time_t now = get_absolute_time();
-
-			if (absolute_time_diff_us(last_trigger, now) >= static_cast<int64_t>(SELECT_REPEAT_GUARD_MS) * 1000)
-			{
-				sleep_ms(SELECT_DEBOUNCE_MS);
-
-				if (is_button_pressed(SELECT_BUTTON_GPIO))
-				{
-					std::printf("SELECT pressed\r\n");
-
-					bool ok = generate_file_list_txt();
-
-					if (ok)
-					{
-						std::printf("LIST.TXT generated\r\n");
-					}
-					else
-					{
-						std::printf("LIST.TXT generation failed\r\n");
-					}
-
-					last_trigger = get_absolute_time();
-
-					while (is_button_pressed(SELECT_BUTTON_GPIO))
-					{
-						sleep_ms(10);
-					}
-				}
-			}
-		}
-
 		sleep_ms(10);
 	}
 }

@@ -5,13 +5,13 @@ extern "C"
 
 	static sd_sdio_if_t sdio_if =
 		{
-			.CMD_gpio = 7,
-			.D0_gpio = 8,
+			.CMD_gpio = 3,
+			.D0_gpio = 4,
 			.SDIO_PIO = pio1,
 			.DMA_IRQ_num = DMA_IRQ_1,
 
 #if PICO_RP2040
-			.baud_rate = 1 * 1000 * 1000
+			.baud_rate = 1 * 1000 * 10
 #endif
 
 #if PICO_RP2350
