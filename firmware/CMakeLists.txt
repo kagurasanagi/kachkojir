@@ -14,6 +14,10 @@ add_executable(kachkojir
 	src/hw_config.cpp
 	src/usb_gamepad_host.cpp
 	src/usb_descriptors.c
+	src/boot_mode.cpp
+	src/storage_mode.cpp
+	src/usb_msc_mode.cpp
+	src/debug_leds.cpp
 	${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/dcd_pio_usb.c
 	${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
 )

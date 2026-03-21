@@ -1,11 +1,16 @@
 #include "hw_config.h"
 
+#include "app_config.hpp"
+#include "storage_mode.hpp"
+
 extern "C"
 {
 	static sd_sdio_if_t sdio_if{};
+	static spi_t spi_if{};
+	static sd_spi_if_t sd_spi_if{};
 	static sd_card_t sd_card{};
 
-	static void init_hw_config()
+	static void init_sd_sdio_mode()
 	{
 		sdio_if.CMD_gpio = 3;
 		sdio_if.D0_gpio = 4;
@@ -15,18 +20,38 @@ extern "C"
 
 		sd_card.type = SD_IF_SDIO;
 		sd_card.sdio_if_p = &sdio_if;
+		sd_card.spi_if_p = nullptr;
 		sd_card.use_card_detect = false;
 	}
 
-	struct hw_config_initializer_t
+	static void init_sd_spi_mode()
 	{
-		hw_config_initializer_t()
-		{
-			init_hw_config();
-		}
-	};
+		spi_if.hw_inst = spi1;
+		spi_if.miso_gpio = SD_SPI_MISO_GPIO;
+		spi_if.mosi_gpio = SD_SPI_MOSI_GPIO;
+		spi_if.sck_gpio = SD_SPI_SCK_GPIO;
+		spi_if.baud_rate = SD_SPI_BAUD_RATE;
 
-	static hw_config_initializer_t hw_config_initializer;
+		sd_spi_if.spi = &spi_if;
+		sd_spi_if.ss_gpio = SD_SPI_CS_GPIO;
+
+		sd_card.type = SD_IF_SPI;
+		sd_card.spi_if_p = &sd_spi_if;
+		sd_card.sdio_if_p = nullptr;
+		sd_card.use_card_detect = false;
+	}
+
+	void storage_hw_init_for_mode(StorageMode mode)
+	{
+		if (mode == StorageMode::SdioRawMsc)
+		{
+			init_sd_sdio_mode();
+		}
+		else
+		{
+			init_sd_spi_mode();
+		}
+	}
 
 	size_t sd_get_num(void)
 	{
