@@ -10,4 +10,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 pico_sdk_init()
 
-add_subdirectory(firmware/sd_bridge)
+add_subdirectory(firmware)
