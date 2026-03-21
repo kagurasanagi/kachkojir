@@ -23,10 +23,6 @@ extern "C"
 extern "C"
 {
 	void usb_descriptors_set_msc_mode(bool enabled);
-
-	void tud_mount_cb(void)
-	{
-	}
 }
 
 namespace
@@ -191,7 +187,15 @@ int main()
 
 			if (usb_msc_mode_should_reboot())
 			{
+				// ホストに確実に detach を見せる
+				if (tud_inited())
+				{
+					tud_disconnect();
+					sleep_ms(USB_REENUMERATION_GUARD_MS);
+				}
+
 				watchdog_reboot(0, 0, MSC_REBOOT_DELAY_MS);
+
 				while (true)
 				{
 					tight_loop_contents();

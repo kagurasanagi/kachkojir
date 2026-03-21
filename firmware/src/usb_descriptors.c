@@ -1,8 +1,6 @@
 #include <string.h>
 #include "tusb.h"
 
-extern void debug_led_25(bool on);
-
 static bool g_usb_msc_mode = false;
 
 void usb_descriptors_set_msc_mode(bool enabled)
@@ -58,7 +56,6 @@ static tusb_desc_device_t const desc_device_msc =
 
 uint8_t const *tud_descriptor_device_cb(void)
 {
-	debug_led_25(true);
 	return (uint8_t const *)(g_usb_msc_mode ? &desc_device_msc : &desc_device_cdc);
 }
 
@@ -100,7 +97,6 @@ uint8_t const desc_fs_configuration_msc[] =
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
 {
 	(void)index;
-	debug_led_25(true);
 	return g_usb_msc_mode ? desc_fs_configuration_msc : desc_fs_configuration_cdc;
 }
 
@@ -127,7 +123,6 @@ static uint16_t _desc_str[32];
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
 	(void)langid;
-	debug_led_25(true);
 
 	char const **table = g_usb_msc_mode ? string_desc_arr_msc : string_desc_arr_cdc;
 	uint8_t count = g_usb_msc_mode

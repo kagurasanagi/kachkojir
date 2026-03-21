@@ -167,8 +167,14 @@ extern "C"
 		}
 	}
 
+	void tud_mount_cb(void)
+	{
+		debug_led_25(true);
+	}
+
 	void tud_umount_cb(void)
 	{
+		debug_led_25(false);
 		g_should_reboot = true;
 	}
 }
