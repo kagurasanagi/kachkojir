@@ -9,14 +9,7 @@ extern "C"
 			.D0_gpio = 4,
 			.SDIO_PIO = pio1,
 			.DMA_IRQ_num = DMA_IRQ_1,
-
-#if PICO_RP2040
-			.baud_rate = 4 * 1000 * 1000
-#endif
-
-#if PICO_RP2350
-							 .baud_rate = 25 * 1000 * 1000
-#endif
+			.baud_rate = 125 * 1000 * 1000 / 4,
 	};
 
 	static sd_card_t sd_card =
