@@ -23,6 +23,10 @@ extern "C"
 extern "C"
 {
 	void usb_descriptors_set_msc_mode(bool enabled);
+
+	void tud_mount_cb(void)
+	{
+	}
 }
 
 namespace
@@ -168,13 +172,17 @@ int main()
 
 	if (mode == BootMode::MassStorage)
 	{
-		gpio_put(23, 1);
+		debug_led_23(true);
+		debug_led_24(false);
+		debug_led_25(false);
 
 		storage_set_mode(StorageMode::SdioRawMsc);
 		storage_hw_init_for_mode(StorageMode::SdioRawMsc);
 		usb_descriptors_set_msc_mode(true);
 
 		tud_init(0);
+		debug_led_24(true);
+
 		usb_msc_mode_init();
 
 		while (true)
@@ -206,10 +214,6 @@ int main()
 
 	usb_gamepad_host_init();
 	sleep_ms(50);
-
-	debug_led_23(false);
-	debug_led_24(false);
-	debug_led_25(false);
 
 	while (true)
 	{

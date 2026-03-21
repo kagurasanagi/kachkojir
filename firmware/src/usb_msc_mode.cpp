@@ -91,7 +91,6 @@ void usb_msc_mode_init()
 {
 	g_should_reboot = false;
 	disk_initialize(MSC_PDRV);
-	debug_led_25(false);
 }
 
 bool usb_msc_mode_should_reboot()
@@ -104,7 +103,6 @@ extern "C"
 	void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16], uint8_t product_rev[4])
 	{
 		(void)lun;
-		debug_led_25(true);
 
 		const char vid[8] = {'K', 'a', 'c', 'h', 'k', 'o', 'j', 'i'};
 		const char pid[16] = {'r', ' ', 'S', 'D', ' ', 'S', 't', 'o', 'r', 'a', 'g', 'e', ' ', ' ', ' ', ' '};
@@ -118,14 +116,12 @@ extern "C"
 	bool tud_msc_test_unit_ready_cb(uint8_t lun)
 	{
 		(void)lun;
-		debug_led_25(true);
 		return card_ready();
 	}
 
 	void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size)
 	{
 		(void)lun;
-		debug_led_25(true);
 		*block_count = card_block_count();
 		*block_size = card_block_size();
 	}
@@ -153,9 +149,6 @@ extern "C"
 		(void)lun;
 		(void)buffer;
 		(void)bufsize;
-
-		// 下位3bitだけ表示
-		debug_leds_show_binary((uint8_t)(scsi_cmd[0] & 0x07));
 
 		switch (scsi_cmd[0])
 		{

@@ -1,6 +1,7 @@
-#include "pico/stdlib.h"
 #include <string.h>
 #include "tusb.h"
+
+extern void debug_led_25(bool on);
 
 static bool g_usb_msc_mode = false;
 
@@ -14,11 +15,12 @@ bool usb_descriptors_is_msc_mode(void)
 	return g_usb_msc_mode;
 }
 
-#define _PID_MAP(itf, n) ((CFG_TUD_##itf) << (n))
-#define USB_PID_CDC (0x4000 | _PID_MAP(CDC, 0))
-#define USB_PID_MSC (0x4000 | _PID_MAP(MSC, 0))
 #define USB_VID 0xCafe
 #define USB_BCD 0x0200
+
+// Windows が CDC/MSC を別物として認識できるよう固定で分ける
+#define USB_PID_CDC 0x4001
+#define USB_PID_MSC 0x4010
 
 static tusb_desc_device_t const desc_device_cdc =
 	{
@@ -42,9 +44,9 @@ static tusb_desc_device_t const desc_device_msc =
 		.bLength = sizeof(tusb_desc_device_t),
 		.bDescriptorType = TUSB_DESC_DEVICE,
 		.bcdUSB = USB_BCD,
-		.bDeviceClass = TUSB_CLASS_MSC,
-		.bDeviceSubClass = MSC_SUBCLASS_SCSI,
-		.bDeviceProtocol = MSC_PROTOCOL_BOT,
+		.bDeviceClass = 0x00,
+		.bDeviceSubClass = 0x00,
+		.bDeviceProtocol = 0x00,
 		.bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
 		.idVendor = USB_VID,
 		.idProduct = USB_PID_MSC,
@@ -56,7 +58,7 @@ static tusb_desc_device_t const desc_device_msc =
 
 uint8_t const *tud_descriptor_device_cb(void)
 {
-	gpio_put(24, 1);
+	debug_led_25(true);
 	return (uint8_t const *)(g_usb_msc_mode ? &desc_device_msc : &desc_device_cdc);
 }
 
@@ -76,8 +78,9 @@ enum
 #define EPNUM_CDC_NOTIF 0x81
 #define EPNUM_CDC_OUT 0x02
 #define EPNUM_CDC_IN 0x82
-#define EPNUM_MSC_OUT 0x03
-#define EPNUM_MSC_IN 0x83
+
+#define EPNUM_MSC_OUT 0x01
+#define EPNUM_MSC_IN 0x81
 
 #define CONFIG_TOTAL_LEN_CDC (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
 #define CONFIG_TOTAL_LEN_MSC (TUD_CONFIG_DESC_LEN + TUD_MSC_DESC_LEN)
@@ -97,7 +100,7 @@ uint8_t const desc_fs_configuration_msc[] =
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
 {
 	(void)index;
-	gpio_put(24, 1);
+	debug_led_25(true);
 	return g_usb_msc_mode ? desc_fs_configuration_msc : desc_fs_configuration_cdc;
 }
 
@@ -115,7 +118,7 @@ char const *string_desc_arr_msc[] =
 		(const char[]){0x09, 0x04},
 		"Kachkojir",
 		"Kachkojir SD MSC",
-		"000000000001",
+		"000000000002",
 		"Kachkojir MSC",
 };
 
@@ -124,7 +127,7 @@ static uint16_t _desc_str[32];
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
 	(void)langid;
-	gpio_put(24, 1);
+	debug_led_25(true);
 
 	char const **table = g_usb_msc_mode ? string_desc_arr_msc : string_desc_arr_cdc;
 	uint8_t count = g_usb_msc_mode
@@ -147,6 +150,7 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 
 		const char *str = table[index];
 		chr_count = (uint8_t)strlen(str);
+
 		if (chr_count > 31)
 		{
 			chr_count = 31;
