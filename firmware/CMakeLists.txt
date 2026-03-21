@@ -1,5 +1,5 @@
-set(SD_LIB_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../external/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico)
-set(PICO_PIO_USB_DIR ${CMAKE_CURRENT_LIST_DIR}/../../external/Pico-PIO-USB)
+set(SD_LIB_ROOT ${CMAKE_CURRENT_LIST_DIR}/../external/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico)
+set(PICO_PIO_USB_DIR ${CMAKE_CURRENT_LIST_DIR}/../external/Pico-PIO-USB)
 
 add_subdirectory(${SD_LIB_ROOT}/src ${CMAKE_CURRENT_BINARY_DIR}/noosfat_build)
 
