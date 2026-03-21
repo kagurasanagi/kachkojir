@@ -1,21 +1,53 @@
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
+#include "hardware/clocks.h"
 
 extern "C"
 {
 #include "ff.h"
 }
 
+#include "tusb.h"
+
 #include "app_config.hpp"
+#include "usb_gamepad_host.hpp"
 
 namespace
 {
-
 	FATFS g_fs;
 	bool g_sd_ready = false;
+
+	void cdc_printf(const char *fmt, ...)
+	{
+		if (!tud_inited())
+		{
+			return;
+		}
+
+		char buf[256];
+
+		va_list args;
+		va_start(args, fmt);
+		int len = vsnprintf(buf, sizeof(buf), fmt, args);
+		va_end(args);
+
+		if (len <= 0)
+		{
+			return;
+		}
+
+		if (len > (int)sizeof(buf))
+		{
+			len = sizeof(buf);
+		}
+
+		tud_cdc_write(buf, (uint32_t)len);
+		tud_cdc_write_flush();
+	}
 
 	void init_button(uint gpio)
 	{
@@ -24,215 +56,259 @@ namespace
 		gpio_pull_up(gpio);
 	}
 
-	bool is_button_pressed(uint gpio)
-	{
-		return gpio_get(gpio) == BUTTON_ACTIVE_LEVEL;
-	}
-
 	bool mount_sd_once()
 	{
 		std::memset(&g_fs, 0, sizeof(g_fs));
-
-		std::printf("before f_mount\r\n");
 		FRESULT fr = f_mount(&g_fs, "", 1);
-		std::printf("after f_mount: %d\r\n", fr);
-
-		if (fr != FR_OK)
-		{
-			return false;
-		}
-
-		return true;
+		return fr == FR_OK;
 	}
 
-	bool write_text(FIL &fil, const char *text)
+	void dump_host_event(uint32_t event_id, uint32_t data0, uint32_t data1, uint32_t data2)
 	{
-		UINT written = 0;
-		FRESULT fr = f_write(&fil, text, static_cast<UINT>(std::strlen(text)), &written);
-
-		if (fr != FR_OK)
+		switch (event_id)
 		{
-			std::printf("f_write failed: %d\r\n", fr);
-			return false;
+
+		case USB_DEBUG_EVENT_HOST_STARTED:
+			cdc_printf("[USBH] host started\r\n");
+			break;
+
+		case USB_DEBUG_EVENT_DEVICE_MOUNT:
+		{
+			uint8_t dev_addr = (uint8_t)data0;
+			uint16_t vid = (uint16_t)(data1 >> 16);
+			uint16_t pid = (uint16_t)(data1 & 0xffff);
+			cdc_printf("[USBH] device mount: addr=%u vid=%04x pid=%04x\r\n", dev_addr, vid, pid);
+			break;
 		}
 
-		if (written != std::strlen(text))
+		case USB_DEBUG_EVENT_DEVICE_UMOUNT:
+			cdc_printf("[USBH] device umount: addr=%u\r\n", (unsigned)data0);
+			break;
+
+		case USB_DEBUG_EVENT_HID_MOUNT:
 		{
-			std::printf("short write: %u / %u\r\n",
-						written,
-						static_cast<unsigned>(std::strlen(text)));
-			return false;
+			uint8_t dev_addr = (uint8_t)(data0 >> 16);
+			uint8_t instance = (uint8_t)(data0 & 0xffff);
+			uint32_t protocol = data1;
+			uint32_t desc_len = data2;
+			cdc_printf(
+				"[USBH] hid mount: addr=%u instance=%u protocol=%lu desc_len=%lu\r\n",
+				dev_addr,
+				instance,
+				(unsigned long)protocol,
+				(unsigned long)desc_len);
+			break;
 		}
 
-		return true;
+		case USB_DEBUG_EVENT_HID_UMOUNT:
+		{
+			uint8_t dev_addr = (uint8_t)(data0 >> 16);
+			uint8_t instance = (uint8_t)(data0 & 0xffff);
+			cdc_printf("[USBH] hid umount: addr=%u instance=%u\r\n", dev_addr, instance);
+			break;
+		}
+
+		case USB_DEBUG_EVENT_REPORT:
+		{
+			// uint8_t dev_addr = (uint8_t)(data0 >> 16);
+			// uint8_t instance = (uint8_t)(data0 & 0xffff);
+			// uint16_t protocol = (uint16_t)(data1 >> 16);
+			// uint16_t len = (uint16_t)(data1 & 0xffff);
+			// uint8_t first_byte = (uint8_t)data2;
+			// cdc_printf(
+			// 	"[USBH] report: addr=%u instance=%u protocol=%u len=%u first=%02x\r\n",
+			// 	dev_addr,
+			// 	instance,
+			// 	protocol,
+			// 	len,
+			// 	first_byte);
+			break;
+		}
+
+		case USB_DEBUG_EVENT_REPORT_REQUEST_FAIL:
+		{
+			uint8_t dev_addr = (uint8_t)(data0 >> 16);
+			uint8_t instance = (uint8_t)(data0 & 0xffff);
+			cdc_printf(
+				"[USBH] report request failed: addr=%u instance=%u phase=%lu\r\n",
+				dev_addr,
+				instance,
+				(unsigned long)data1);
+			break;
+		}
+		case 100:
+			cdc_printf("[USBH] core1 entered\r\n");
+			break;
+
+		case 101:
+			cdc_printf("[USBH] core1 configuring pio usb: dp_gpio=%lu pinout=%lu\r\n",
+					   (unsigned long)data0,
+					   (unsigned long)data1);
+			break;
+
+		case 102:
+			cdc_printf("[USBH] tuh_configure done\r\n");
+			break;
+		case 103:
+			cdc_printf("[USBH] calling tuh_init(1)\r\n");
+			break;
+
+		case 104:
+			cdc_printf("[USBH] tuh_init(1) returned\r\n");
+			break;
+		default:
+			cdc_printf("[USBH] unknown event: id=%lu %lu %lu %lu\r\n",
+					   (unsigned long)event_id,
+					   (unsigned long)data0,
+					   (unsigned long)data1,
+					   (unsigned long)data2);
+			break;
+		}
 	}
 
-	bool generate_file_list_txt()
+	void dump_gamepad_states()
 	{
-		if (!g_sd_ready)
+		static uint8_t prev_report[USB_HOST_MAX_GAMEPADS][USB_HOST_MAX_REPORT_BYTES];
+		static uint16_t prev_len[USB_HOST_MAX_GAMEPADS] = {};
+		static bool prev_valid[USB_HOST_MAX_GAMEPADS] = {};
+
+		for (std::size_t i = 0; i < USB_HOST_MAX_GAMEPADS; ++i)
 		{
-			std::printf("SD not ready\r\n");
-			return false;
-		}
-
-		std::printf("generate_file_list_txt: begin\r\n");
-
-		FIL fil;
-		FRESULT fr = f_open(&fil, "LIST.TXT", FA_CREATE_ALWAYS | FA_WRITE);
-		std::printf("after f_open: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return false;
-		}
-
-		auto fail_close = [&](const char *label, FRESULT code) -> bool
-		{
-			std::printf("%s: %d\r\n", label, code);
-			f_close(&fil);
-			return false;
-		};
-
-		if (!write_text(fil, "LIST.TXT\r\n"))
-		{
-			return fail_close("header write failed", FR_INT_ERR);
-		}
-
-		if (!write_text(fil, "==============================\r\n"))
-		{
-			return fail_close("separator write failed", FR_INT_ERR);
-		}
-
-		DIR dir;
-		FILINFO fno;
-
-		fr = f_opendir(&dir, "");
-		std::printf("after f_opendir: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return fail_close("f_opendir failed", fr);
-		}
-
-		for (;;)
-		{
-			fr = f_readdir(&dir, &fno);
-			if (fr != FR_OK)
+			UsbGamepadState state{};
+			if (!usb_gamepad_host_get_state(i, state))
 			{
-				f_closedir(&dir);
-				return fail_close("f_readdir failed", fr);
+				continue;
 			}
 
-			if (fno.fname[0] == '\0')
+			if (!state.connected)
 			{
-				break;
+				cdc_printf("[PAD] slot=%u disconnected\r\n", (unsigned)i);
+				prev_valid[i] = false;
+				prev_len[i] = 0;
+				continue;
 			}
 
-			char line[384];
+			bool changed = true;
 
-			if (fno.fattrib & AM_DIR)
+			if (prev_valid[i] && prev_len[i] == state.report_len)
 			{
-				std::snprintf(line, sizeof(line), "[DIR ] %s\r\n", fno.fname);
+				if (std::memcmp(prev_report[i], state.report, state.report_len) == 0)
+				{
+					changed = false;
+				}
+			}
+
+			if (!changed)
+			{
+				continue;
+			}
+
+			if (state.report_len <= USB_HOST_MAX_REPORT_BYTES)
+			{
+				std::memcpy(prev_report[i], state.report, state.report_len);
+				prev_len[i] = state.report_len;
+				prev_valid[i] = true;
+			}
+
+			char line[512];
+			int pos = std::snprintf(
+				line,
+				sizeof(line),
+				"[PAD] slot=%u addr=%u inst=%u vid=%04x pid=%04x usage=%04x:%04x len=%u data=",
+				(unsigned)i,
+				state.dev_addr,
+				state.instance,
+				state.vid,
+				state.pid,
+				state.usage_page,
+				state.usage,
+				state.report_len);
+
+			for (uint16_t j = 0; j < state.report_len && pos > 0 && pos < (int)sizeof(line); ++j)
+			{
+				pos += std::snprintf(
+					line + pos,
+					sizeof(line) - (size_t)pos,
+					"%02x%s",
+					state.report[j],
+					(j + 1 < state.report_len) ? " " : "");
+			}
+
+			if (pos > 0 && pos < (int)sizeof(line))
+			{
+				std::snprintf(line + pos, sizeof(line) - (size_t)pos, "\r\n");
 			}
 			else
 			{
-				std::snprintf(
-					line,
-					sizeof(line),
-					"[FILE] %10lu %s\r\n",
-					static_cast<unsigned long>(fno.fsize),
-					fno.fname);
+				line[sizeof(line) - 3] = '\r';
+				line[sizeof(line) - 2] = '\n';
+				line[sizeof(line) - 1] = '\0';
 			}
 
-			if (!write_text(fil, line))
-			{
-				f_closedir(&dir);
-				return fail_close("item write failed", FR_INT_ERR);
-			}
+			tud_cdc_write_str(line);
+			tud_cdc_write_flush();
 		}
-
-		fr = f_closedir(&dir);
-		if (fr != FR_OK)
-		{
-			return fail_close("f_closedir failed", fr);
-		}
-
-		fr = f_sync(&fil);
-		std::printf("after f_sync: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return fail_close("f_sync failed", fr);
-		}
-
-		fr = f_close(&fil);
-		std::printf("after f_close: %d\r\n", fr);
-		if (fr != FR_OK)
-		{
-			return false;
-		}
-
-		return true;
 	}
-
 }
-
 int main()
 {
-	stdio_init_all();
+	set_sys_clock_khz(120000, true);
 
 	init_button(SELECT_BUTTON_GPIO);
+	init_button(START_BUTTON_GPIO);
 
-	sleep_ms(1500);
-	std::printf("kachkojir normal mode start\r\n");
+	usb_gamepad_host_init();
+	sleep_ms(50);
+	tud_init(0);
 
 	g_sd_ready = mount_sd_once();
 
-	if (g_sd_ready)
-	{
-		std::printf("SD mounted successfully\r\n");
-	}
-	else
-	{
-		std::printf("SD mount failed\r\n");
-	}
-
-	std::printf("Press SELECT button to generate LIST.TXT\r\n");
-
-	absolute_time_t last_trigger = get_absolute_time();
-
 	while (true)
 	{
-		if (is_button_pressed(SELECT_BUTTON_GPIO))
+		tud_task();
+
+		static bool boot_logged = false;
+		if (!boot_logged)
 		{
-			absolute_time_t now = get_absolute_time();
-
-			if (absolute_time_diff_us(last_trigger, now) >= static_cast<int64_t>(SELECT_REPEAT_GUARD_MS) * 1000)
-			{
-				sleep_ms(SELECT_DEBOUNCE_MS);
-
-				if (is_button_pressed(SELECT_BUTTON_GPIO))
-				{
-					std::printf("SELECT pressed\r\n");
-
-					bool ok = generate_file_list_txt();
-
-					if (ok)
-					{
-						std::printf("LIST.TXT generated\r\n");
-					}
-					else
-					{
-						std::printf("LIST.TXT generation failed\r\n");
-					}
-
-					last_trigger = get_absolute_time();
-
-					while (is_button_pressed(SELECT_BUTTON_GPIO))
-					{
-						sleep_ms(10);
-					}
-				}
-			}
+			cdc_printf("kachkojir dual mode start\r\n");
+			cdc_printf("SD mount: %s\r\n", g_sd_ready ? "OK" : "NG");
+			boot_logged = true;
 		}
 
-		sleep_ms(10);
+		uint32_t event_id = 0;
+		uint32_t data0 = 0;
+		uint32_t data1 = 0;
+		uint32_t data2 = 0;
+
+		while (usb_gamepad_host_consume_debug_event(event_id, data0, data1, data2))
+		{
+			dump_host_event(event_id, data0, data1, data2);
+		}
+
+		dump_gamepad_states();
+
+		static absolute_time_t last_alive = get_absolute_time();
+		absolute_time_t now = get_absolute_time();
+
+		if (absolute_time_diff_us(last_alive, now) >= 1000 * 1000)
+		{
+			UsbHostDebugSnapshot s = usb_gamepad_host_get_debug_snapshot();
+
+			cdc_printf(
+				"alive core1=%u cfg=%u host=%u mount=%lu umount=%lu hid_mount=%lu hid_umount=%lu report=%lu req_fail=%lu\r\n",
+				s.core1_entered ? 1u : 0u,
+				s.host_configured ? 1u : 0u,
+				s.host_started ? 1u : 0u,
+				(unsigned long)s.mount_count,
+				(unsigned long)s.umount_count,
+				(unsigned long)s.hid_mount_count,
+				(unsigned long)s.hid_umount_count,
+				(unsigned long)s.report_count,
+				(unsigned long)s.receive_request_fail_count);
+
+			last_alive = now;
+		}
+
+		sleep_ms(1);
 	}
 }
