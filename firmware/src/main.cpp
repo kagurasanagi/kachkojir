@@ -58,6 +58,13 @@ namespace
 		tud_cdc_write_flush();
 	}
 
+	void init_button(uint gpio)
+	{
+		gpio_init(gpio);
+		gpio_set_dir(gpio, GPIO_IN);
+		gpio_pull_up(gpio);
+	}
+
 	bool mount_sd_once()
 	{
 		std::memset(&g_fs, 0, sizeof(g_fs));
@@ -157,10 +164,96 @@ namespace
 			break;
 		}
 	}
+
+	void dump_gamepad_states()
+	{
+		static uint8_t prev_report[USB_HOST_MAX_GAMEPADS][USB_HOST_MAX_REPORT_BYTES];
+		static uint16_t prev_len[USB_HOST_MAX_GAMEPADS] = {};
+		static bool prev_valid[USB_HOST_MAX_GAMEPADS] = {};
+
+		for (std::size_t i = 0; i < USB_HOST_MAX_GAMEPADS; ++i)
+		{
+			UsbGamepadState state{};
+			if (!usb_gamepad_host_get_state(i, state))
+			{
+				continue;
+			}
+
+			if (!state.connected)
+			{
+				cdc_printf("[PAD] slot=%u disconnected\r\n", (unsigned)i);
+				prev_valid[i] = false;
+				prev_len[i] = 0;
+				continue;
+			}
+
+			bool changed = true;
+
+			if (prev_valid[i] && prev_len[i] == state.report_len)
+			{
+				if (std::memcmp(prev_report[i], state.report, state.report_len) == 0)
+				{
+					changed = false;
+				}
+			}
+
+			if (!changed)
+			{
+				continue;
+			}
+
+			if (state.report_len <= USB_HOST_MAX_REPORT_BYTES)
+			{
+				std::memcpy(prev_report[i], state.report, state.report_len);
+				prev_len[i] = state.report_len;
+				prev_valid[i] = true;
+			}
+
+			char line[512];
+			int pos = std::snprintf(
+				line,
+				sizeof(line),
+				"[PAD] slot=%u addr=%u inst=%u vid=%04x pid=%04x usage=%04x:%04x len=%u data=",
+				(unsigned)i,
+				state.dev_addr,
+				state.instance,
+				state.vid,
+				state.pid,
+				state.usage_page,
+				state.usage,
+				state.report_len);
+
+			for (uint16_t j = 0; j < state.report_len && pos > 0 && pos < (int)sizeof(line); ++j)
+			{
+				pos += std::snprintf(
+					line + pos,
+					sizeof(line) - (size_t)pos,
+					"%02x%s",
+					state.report[j],
+					(j + 1 < state.report_len) ? " " : "");
+			}
+
+			if (pos > 0 && pos < (int)sizeof(line))
+			{
+				std::snprintf(line + pos, sizeof(line) - (size_t)pos, "\r\n");
+			}
+			else
+			{
+				line[sizeof(line) - 3] = '\r';
+				line[sizeof(line) - 2] = '\n';
+				line[sizeof(line) - 1] = '\0';
+			}
+
+			tud_cdc_write_str(line);
+			tud_cdc_write_flush();
+		}
+	}
 }
 
 int main()
 {
+	set_sys_clock_khz(120000, true);
+	init_button(START_BUTTON_GPIO);
 	debug_leds_init();
 
 	BootMode mode = detect_boot_mode();
@@ -254,6 +347,30 @@ int main()
 		while (usb_gamepad_host_consume_debug_event(event_id, data0, data1, data2))
 		{
 			dump_host_event(event_id, data0, data1, data2);
+		}
+
+		dump_gamepad_states();
+
+		static absolute_time_t last_alive = get_absolute_time();
+		now = get_absolute_time();
+
+		if (absolute_time_diff_us(last_alive, now) >= 1000 * 1000)
+		{
+			UsbHostDebugSnapshot s = usb_gamepad_host_get_debug_snapshot();
+
+			cdc_printf(
+				"alive core1=%u cfg=%u host=%u mount=%lu umount=%lu hid_mount=%lu hid_umount=%lu report=%lu req_fail=%lu\r\n",
+				s.core1_entered ? 1u : 0u,
+				s.host_configured ? 1u : 0u,
+				s.host_started ? 1u : 0u,
+				(unsigned long)s.mount_count,
+				(unsigned long)s.umount_count,
+				(unsigned long)s.hid_mount_count,
+				(unsigned long)s.hid_umount_count,
+				(unsigned long)s.report_count,
+				(unsigned long)s.receive_request_fail_count);
+
+			last_alive = now;
 		}
 
 		sleep_ms(1);
