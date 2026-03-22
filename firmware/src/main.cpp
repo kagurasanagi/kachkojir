@@ -161,7 +161,6 @@ namespace
 
 int main()
 {
-	set_sys_clock_khz(120000, true);
 	debug_leds_init();
 
 	BootMode mode = detect_boot_mode();
@@ -173,7 +172,6 @@ int main()
 		usb_descriptors_set_msc_mode(true);
 
 		tud_init(0);
-
 		usb_msc_mode_init();
 
 		while (true)
@@ -182,7 +180,6 @@ int main()
 
 			if (usb_msc_mode_should_reboot())
 			{
-				// ホストに確実に detach を見せる
 				if (tud_inited())
 				{
 					tud_disconnect();
@@ -207,9 +204,7 @@ int main()
 
 	tud_init(0);
 
-	// まずは切り分けのため mount しない
-	// g_sd_ready = mount_sd_once();
-	g_sd_ready = false;
+	g_sd_ready = mount_sd_once();
 
 	usb_gamepad_host_init();
 	sleep_ms(50);

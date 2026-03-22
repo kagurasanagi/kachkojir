@@ -14,17 +14,23 @@ extern "C"
 namespace
 {
 	volatile bool g_should_reboot = false;
+	bool g_ejected = false;
 	constexpr BYTE MSC_PDRV = 0;
 
 	bool card_ready()
 	{
 		DSTATUS st = disk_initialize(MSC_PDRV);
-		return (st & STA_NOINIT) == 0;
+		return ((st & STA_NOINIT) == 0) && ((st & STA_NODISK) == 0);
 	}
 
 	uint32_t card_block_count()
 	{
 		LBA_t sector_count = 0;
+
+		if (!card_ready())
+		{
+			return 0;
+		}
 
 		if (disk_ioctl(MSC_PDRV, GET_SECTOR_COUNT, &sector_count) != RES_OK)
 		{
@@ -38,6 +44,11 @@ namespace
 	{
 		WORD sector_size = 512;
 
+		if (!card_ready())
+		{
+			return 512;
+		}
+
 		if (disk_ioctl(MSC_PDRV, GET_SECTOR_SIZE, &sector_size) != RES_OK)
 		{
 			return 512;
@@ -48,6 +59,11 @@ namespace
 
 	int32_t card_read(uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 	{
+		if (g_ejected || !card_ready())
+		{
+			return -1;
+		}
+
 		uint16_t block_size = card_block_size();
 
 		if (offset != 0 || (bufsize % block_size) != 0)
@@ -68,6 +84,11 @@ namespace
 
 	int32_t card_write(uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 	{
+		if (g_ejected || !card_ready())
+		{
+			return -1;
+		}
+
 		uint16_t block_size = card_block_size();
 
 		if (offset != 0 || (bufsize % block_size) != 0)
@@ -90,7 +111,8 @@ namespace
 void usb_msc_mode_init()
 {
 	g_should_reboot = false;
-	disk_initialize(MSC_PDRV);
+	g_ejected = false;
+	// ここで disk_initialize() しない
 }
 
 bool usb_msc_mode_should_reboot()
@@ -116,7 +138,7 @@ extern "C"
 	bool tud_msc_test_unit_ready_cb(uint8_t lun)
 	{
 		(void)lun;
-		return card_ready();
+		return !g_ejected && card_ready();
 	}
 
 	void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size)
@@ -132,6 +154,19 @@ extern "C"
 		return card_read(lba, offset, buffer, bufsize);
 	}
 
+	bool tud_msc_is_writable_cb(uint8_t lun)
+	{
+		(void)lun;
+
+		if (g_ejected)
+		{
+			return false;
+		}
+
+		DSTATUS st = disk_status(MSC_PDRV);
+		return (st & STA_PROTECT) == 0;
+	}
+
 	int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 	{
 		(void)lun;
@@ -144,37 +179,47 @@ extern "C"
 		disk_ioctl(MSC_PDRV, CTRL_SYNC, nullptr);
 	}
 
+	bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject)
+	{
+		(void)lun;
+		(void)power_condition;
+
+		if (load_eject)
+		{
+			if (start)
+			{
+				g_ejected = false;
+			}
+			else
+			{
+				if (disk_ioctl(MSC_PDRV, CTRL_SYNC, nullptr) != RES_OK)
+				{
+					return false;
+				}
+
+				g_ejected = true;
+				g_should_reboot = true;
+			}
+		}
+
+		return true;
+	}
+
 	int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
 	{
 		(void)lun;
+		(void)scsi_cmd;
 		(void)buffer;
 		(void)bufsize;
-
-		switch (scsi_cmd[0])
-		{
-		case SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
-			return 0;
-
-		case SCSI_CMD_START_STOP_UNIT:
-			if ((scsi_cmd[4] & 0x03) == 0x02)
-			{
-				g_should_reboot = true;
-			}
-			return 0;
-
-		default:
-			return -1;
-		}
+		return -1;
 	}
 
 	void tud_mount_cb(void)
 	{
-		debug_led_25(true);
 	}
 
 	void tud_umount_cb(void)
 	{
-		debug_led_25(false);
 		g_should_reboot = true;
 	}
 }

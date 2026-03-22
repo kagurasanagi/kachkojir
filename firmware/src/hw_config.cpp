@@ -1,5 +1,7 @@
 #include "hw_config.h"
 
+#include "hardware/gpio.h"
+
 #include "app_config.hpp"
 #include "storage_mode.hpp"
 
@@ -12,24 +14,42 @@ extern "C"
 
 	static void init_sd_sdio_mode()
 	{
-		sdio_if.CLK_gpio = 2;
+		sdio_if = {};
+		sd_card = {};
+
 		sdio_if.CMD_gpio = 3;
 		sdio_if.D0_gpio = 4;
-		sdio_if.D1_gpio = 5;
-		sdio_if.D2_gpio = 6;
-		sdio_if.D3_gpio = 7;
+		sdio_if.set_drive_strength = true;
+		sdio_if.CLK_gpio_drive_strength = GPIO_DRIVE_STRENGTH_12MA;
+		sdio_if.CMD_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA;
+		sdio_if.D0_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA;
+		sdio_if.D1_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA;
+		sdio_if.D2_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA;
+		sdio_if.D3_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA;
 		sdio_if.SDIO_PIO = pio1;
 		sdio_if.DMA_IRQ_num = DMA_IRQ_1;
-		sdio_if.baud_rate = 4 * 1000 * 1000 / 4;
+
+#if PICO_RP2040
+		sdio_if.baud_rate = 125 * 1000 * 1000 / 4;
+#endif
+
+#if PICO_RP2350
+		sdio_if.baud_rate = 150 * 1000 * 1000 / 6;
+#endif
 
 		sd_card.type = SD_IF_SDIO;
 		sd_card.sdio_if_p = &sdio_if;
-		sd_card.spi_if_p = nullptr;
-		sd_card.use_card_detect = false;
+		sd_card.use_card_detect = true;
+		sd_card.card_detect_gpio = 9;
+		sd_card.card_detected_true = 0;
 	}
 
 	static void init_sd_spi_mode()
 	{
+		spi_if = {};
+		sd_spi_if = {};
+		sd_card = {};
+
 		spi_if.hw_inst = spi1;
 		spi_if.miso_gpio = SD_SPI_MISO_GPIO;
 		spi_if.mosi_gpio = SD_SPI_MOSI_GPIO;
@@ -41,7 +61,6 @@ extern "C"
 
 		sd_card.type = SD_IF_SPI;
 		sd_card.spi_if_p = &sd_spi_if;
-		sd_card.sdio_if_p = nullptr;
 		sd_card.use_card_detect = false;
 	}
 
