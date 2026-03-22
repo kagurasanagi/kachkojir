@@ -10,6 +10,7 @@ extern "C"
 #endif
 
 	void debug_leds_init(void);
+	void debug_led_22(bool on);
 	void debug_led_23(bool on);
 	void debug_led_24(bool on);
 	void debug_led_25(bool on);

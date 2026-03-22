@@ -168,16 +168,11 @@ int main()
 
 	if (mode == BootMode::MassStorage)
 	{
-		debug_led_23(true);
-		debug_led_24(false);
-		debug_led_25(false);
-
 		storage_set_mode(StorageMode::SdioRawMsc);
 		storage_hw_init_for_mode(StorageMode::SdioRawMsc);
 		usb_descriptors_set_msc_mode(true);
 
 		tud_init(0);
-		debug_led_24(true);
 
 		usb_msc_mode_init();
 

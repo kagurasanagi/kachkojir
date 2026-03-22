@@ -48,3 +48,50 @@ pico_enable_stdio_usb(kachkojir 0)
 pico_enable_stdio_uart(kachkojir 0)
 
 pico_add_extra_outputs(kachkojir)
+
+
+
+
+
+
+
+
+
+
+set(USB_MASS_STORAGE_SAMPLE_DIR
+	${CMAKE_CURRENT_LIST_DIR}/../external/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/examples/usb_mass_storage
+)
+
+add_executable(usb_mass_storage_sample_port
+	src/usb_mass_storage_sample_main.c
+	src/usb_mass_storage_sample_msc_disk.c
+	src/usb_mass_storage_sample_usb_descriptors.c
+	src/usb_mass_storage_sample_hw_config.c
+)
+
+target_include_directories(usb_mass_storage_sample_port PRIVATE
+	${USB_MASS_STORAGE_SAMPLE_DIR}
+	${USB_MASS_STORAGE_SAMPLE_DIR}/include
+)
+
+target_compile_definitions(usb_mass_storage_sample_port PUBLIC
+	USE_PRINTF
+	USE_DBG_PRINTF
+	CFG_TUSB_MCU=OPT_MCU_RP2040
+	BOARD_TUD_RHPORT=0
+	BOARD_TUD_MAX_SPEED=OPT_MODE_FULL_SPEED
+)
+
+target_link_libraries(usb_mass_storage_sample_port PRIVATE
+	no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
+	pico_stdlib
+	pico_pio_usb
+	tinyusb_additions
+	tinyusb_board
+	tinyusb_device
+)
+
+pico_enable_stdio_usb(usb_mass_storage_sample_port 1)
+pico_enable_stdio_uart(usb_mass_storage_sample_port 0)
+
+pico_add_extra_outputs(usb_mass_storage_sample_port)

@@ -48,9 +48,9 @@ static tusb_desc_device_t const desc_device_msc =
 		.bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
 		.idVendor = USB_VID,
 		.idProduct = USB_PID_MSC,
-		.bcdDevice = 0x0101,
-		.iManufacturer = 0x01,
-		.iProduct = 0x02,
+		.bcdDevice = 0x0102,
+		.iManufacturer = 0x00,
+		.iProduct = 0x00,
 		.iSerialNumber = 0x03,
 		.bNumConfigurations = 0x01};
 

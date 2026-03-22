@@ -12,11 +12,15 @@ extern "C"
 
 	static void init_sd_sdio_mode()
 	{
+		sdio_if.CLK_gpio = 2;
 		sdio_if.CMD_gpio = 3;
 		sdio_if.D0_gpio = 4;
+		sdio_if.D1_gpio = 5;
+		sdio_if.D2_gpio = 6;
+		sdio_if.D3_gpio = 7;
 		sdio_if.SDIO_PIO = pio1;
 		sdio_if.DMA_IRQ_num = DMA_IRQ_1;
-		sdio_if.baud_rate = 120 * 1000 * 1000 / 4;
+		sdio_if.baud_rate = 4 * 1000 * 1000 / 4;
 
 		sd_card.type = SD_IF_SDIO;
 		sd_card.sdio_if_p = &sdio_if;
