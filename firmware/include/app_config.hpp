@@ -25,8 +25,8 @@ constexpr unsigned int USB_REENUMERATION_GUARD_MS = 300;
 
 // sd spi mode pins (通常モード用)
 // 必要に応じて基板配線に合わせて変更
-constexpr unsigned int SD_SPI_SCK_GPIO = 10;
-constexpr unsigned int SD_SPI_MOSI_GPIO = 11;
-constexpr unsigned int SD_SPI_MISO_GPIO = 12;
-constexpr unsigned int SD_SPI_CS_GPIO = 13;
+constexpr unsigned int SD_SPI_SCK_GPIO = 2;
+constexpr unsigned int SD_SPI_MOSI_GPIO = 3;
+constexpr unsigned int SD_SPI_MISO_GPIO = 4;
+constexpr unsigned int SD_SPI_CS_GPIO = 7;
 constexpr unsigned int SD_SPI_BAUD_RATE = 12 * 1000 * 1000;

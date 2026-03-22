@@ -8,7 +8,9 @@
 
 extern "C"
 {
+
 #include "ff.h"
+#include "diskio.h"
 }
 
 #include "tusb.h"
@@ -69,8 +71,17 @@ namespace
 	bool mount_sd_once()
 	{
 		std::memset(&g_fs, 0, sizeof(g_fs));
+
+		DSTATUS st_before = disk_status(0);
+		DSTATUS st_init = disk_initialize(0);
+		DSTATUS st_after = disk_status(0);
 		FRESULT fr = f_mount(&g_fs, "", 1);
-		cdc_printf("f_mount: %d\r\n", (int)fr);
+
+		debug_led_22((st_before & STA_NOINIT) != 0);
+		debug_led_23((st_init & STA_NOINIT) != 0);
+		debug_led_24((st_after & STA_NOINIT) != 0);
+		debug_led_25(fr == FR_OK);
+
 		return fr == FR_OK;
 	}
 
@@ -474,7 +485,7 @@ namespace
 		FRESULT fr = f_open(&fp, "LIST.TXT", FA_WRITE | FA_CREATE_ALWAYS);
 		if (fr != FR_OK)
 		{
-			cdc_printf("f_open failed: %d", (int)fr);
+			cdc_printf("f_open failed: %d\r\n", (int)fr);
 			return false;
 		}
 
@@ -483,7 +494,7 @@ namespace
 		fr = f_opendir(&dir, "/");
 		if (fr != FR_OK)
 		{
-			cdc_printf("f_opendir failed: %d", (int)fr);
+			cdc_printf("f_opendir failed: %d\r\n", (int)fr);
 			f_close(&fp);
 			return false;
 		}
@@ -491,19 +502,31 @@ namespace
 		while (true)
 		{
 			fr = f_readdir(&dir, &fno);
-			if (fr != FR_OK || fno.fname[0] == '\0')
+			if (fr != FR_OK)
 			{
-				cdc_printf("f_readdir failed: %d", (int)fr);
+				cdc_printf("f_readdir failed: %d\r\n", (int)fr);
 				f_closedir(&dir);
 				f_close(&fp);
 				return false;
+			}
+
+			if (fno.fname[0] == '\0')
+			{
+				break;
 			}
 
 			char line[300];
 			int len = std::snprintf(line, sizeof(line), "%s\r\n", fno.fname);
 
 			UINT written = 0;
-			f_write(&fp, line, (UINT)len, &written);
+			fr = f_write(&fp, line, (UINT)len, &written);
+			if (fr != FR_OK || written != (UINT)len)
+			{
+				cdc_printf("f_write failed: %d written=%u\r\n", (int)fr, (unsigned)written);
+				f_closedir(&dir);
+				f_close(&fp);
+				return false;
+			}
 		}
 
 		f_closedir(&dir);
@@ -516,7 +539,6 @@ int main()
 {
 	stdio_init_all();
 
-	set_sys_clock_khz(120000, true); // これがあるとMSCモードでホスト側がSDカードを認識しなくなる。
 	init_button(START_BUTTON_GPIO);
 	debug_leds_init();
 
@@ -556,26 +578,18 @@ int main()
 	}
 	sleep_ms(1000);
 
-	storage_set_mode(StorageMode::SpiFatFs);
-	storage_hw_init_for_mode(StorageMode::SpiFatFs);
+	StorageMode stmode = StorageMode::SpiFatFs;
+	// StorageMode stmode = StorageMode::SdioRawMsc;
+	storage_set_mode(stmode);
+	storage_hw_init_for_mode(stmode);
 	usb_descriptors_set_msc_mode(false);
+
+	tud_init(0);
 
 	usb_gamepad_host_init();
 	sleep_ms(50);
 
-	tud_init(0);
-
 	g_sd_ready = mount_sd_once();
-	if (g_sd_ready)
-	{
-		cdc_printf("SD mounted successfully\r\n");
-		debug_led_24(true);
-	}
-	else
-	{
-		cdc_printf("SD mount failed\r\n");
-		debug_led_25(true);
-	}
 
 	while (true)
 	{

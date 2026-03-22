@@ -39,9 +39,7 @@ extern "C"
 
 		sd_card.type = SD_IF_SDIO;
 		sd_card.sdio_if_p = &sdio_if;
-		sd_card.use_card_detect = true;
-		sd_card.card_detect_gpio = 9;
-		sd_card.card_detected_true = 0;
+		sd_card.use_card_detect = false;
 	}
 
 	static void init_sd_spi_mode()
@@ -50,7 +48,7 @@ extern "C"
 		sd_spi_if = {};
 		sd_card = {};
 
-		spi_if.hw_inst = spi1;
+		spi_if.hw_inst = spi0;
 		spi_if.miso_gpio = SD_SPI_MISO_GPIO;
 		spi_if.mosi_gpio = SD_SPI_MOSI_GPIO;
 		spi_if.sck_gpio = SD_SPI_SCK_GPIO;
